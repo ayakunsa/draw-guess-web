@@ -43,19 +43,23 @@ export async function callChat(settings: Settings, messages: ChatMessage[], exte
         headers: {
           'Content-Type': 'application/json',
           Authorization: 'Bearer ' + settings.ai.apiKey.trim(),
-          'HTTP-Referer': typeof location !== 'undefined' ? location.origin : '',
-          'X-Title': 'Meadowmint Draw',
+          // HTTP-Referer / X-Title are OpenRouter-only and force a CORS
+          // preflight on other providers, so send them only for OpenRouter.
+          ...(settings.ai.provider === 'openrouter' ? {
+            'HTTP-Referer': typeof location !== 'undefined' ? location.origin : '',
+            'X-Title': 'Meadowmint Draw',
+          } : {}),
         },
         body: JSON.stringify({ model: settings.ai.model.trim(), messages, temperature: 0.4, max_tokens: 1200 }),
       });
     } catch (err) {
       if (controller.signal.aborted) throw new AiError('timeout', '请求超时或被取消，请重试');
-      throw new AiError('network', '网络请求失败：可能是离线或浏览器跨域（CORS）限制，请检查网络或自行配置代理（会失去纯前端特性）');
+      throw new AiError('network', '网络请求失败：请检查网络；若浏览器直连被跨域（CORS）拦截（如 AMD TokenLab），可运行随附的「启动 AI 代理.cmd」并把 Base URL 改为 http://127.0.0.1:8787/v1');
     }
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) throw new AiError('http', '认证失败：API Key 无效或无权访问该模型（' + response.status + '）');
+      if (response.status === 401 || response.status === 403) throw new AiError('http', '认证失败：API Key 无效或无权访问该模型（' + response.status + '）；AMD 用户请确认 Key 与模型 ID 正确，直连失败可改用本地代理');
       if (response.status === 402) throw new AiError('http', '额度不足：账户余额或免费额度不足（402）');
-      if (response.status === 429) throw new AiError('http', '请求过于频繁或额度受限（429），稍后重试');
+      if (response.status === 429) throw new AiError('http', '请求频繁、额度受限或模型繁忙（429），稍后重试或换一个模型');
       throw new AiError('http', '接口返回错误 ' + response.status + ' ' + response.statusText);
     }
     let data: { choices?: { message?: { content?: string } }[] };

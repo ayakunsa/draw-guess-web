@@ -23,7 +23,13 @@ export const AI_PROVIDERS = [
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
   { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1' },
   { id: 'moonshot', name: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1' },
+  { id: 'amd', name: 'AMD TokenLab', baseUrl: 'https://api.tokenlab.amd.com/v1' },
   { id: 'custom', name: '自定义', baseUrl: '' },
+] as const;
+// AMD TokenLab model IDs are exact catalog names (case-sensitive), not the
+// provider/model-style presets above. Pick one matching your AMD LAB console.
+export const AMD_MODEL_PRESETS = [
+  'Gemma-4-31B-IT', 'DeepSeek-V4.1-Flash', 'Qwen3.8-27B', 'MiniCPM5-2B', 'MiniCPM-V-4.7',
 ] as const;
 // Known model presets from upstream config.json (names only; no keys).
 export const MODEL_PRESETS = [

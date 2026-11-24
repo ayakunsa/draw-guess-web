@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CATEGORIES, CATEGORY_LEVELS, type Category, type Level } from '../game/words';
-import { AI_PROVIDERS, DEFAULT_SETTINGS, MODEL_PRESETS, type Settings } from '../game/settings';
+import { AI_PROVIDERS, AMD_MODEL_PRESETS, DEFAULT_SETTINGS, MODEL_PRESETS, type Settings } from '../game/settings';
 import { testConnection } from '../ai/client';
 
 // Modal z-30: below wordReveal/handoff (z-40), above the toolbar.
@@ -16,9 +16,12 @@ export const SettingsPanel: React.FC<{ value: Settings; onSave: (value: Settings
   const [customModel, setCustomModel] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const modelIsPreset = MODEL_PRESETS.includes(draft.ai.model);
+  const isAmd = draft.ai.provider === 'amd';
+  // AMD uses exact catalog IDs; other providers use the provider/model presets.
+  const modelPresets: readonly string[] = isAmd ? AMD_MODEL_PRESETS : MODEL_PRESETS;
+  const modelIsPreset = (modelPresets as readonly string[]).includes(draft.ai.model);
   const modelChoice = modelIsPreset ? draft.ai.model : '__custom__';
-  useEffect(() => { if (!MODEL_PRESETS.includes(draft.ai.model)) setCustomModel(draft.ai.model); }, [draft.ai.model]);
+  useEffect(() => { if (!(modelPresets as readonly string[]).includes(draft.ai.model)) setCustomModel(draft.ai.model); }, [draft.ai.model, isAmd]);
 
   const runTest = async () => {
     setTesting(true); setTestResult(null);
@@ -77,7 +80,7 @@ export const SettingsPanel: React.FC<{ value: Settings; onSave: (value: Settings
                 else setAi({ model: e.target.value });
               }}>
                 <option value="">（未选择）</option>
-                {MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
+                {modelPresets.map(m => <option key={m} value={m}>{m}</option>)}
                 <option value="__custom__">自定义（下方输入模型 ID）</option>
               </select>
             </label>
@@ -88,6 +91,9 @@ export const SettingsPanel: React.FC<{ value: Settings; onSave: (value: Settings
             </label>
             <label className={label + ' col-span-2'}>Base URL<input className={input} value={draft.ai.baseUrl} onChange={e => setAi({ baseUrl: e.target.value })} /></label>
           </div>
+          {isAmd && <div className="rounded-lg bg-sk/10 border border-sk/30 px-2 py-1 font-mono text-[10px] text-paper/80 leading-relaxed">
+            AMD TokenLab：模型 ID 必须与 AMD LAB 目录完全一致（大小写敏感，如 Gemma-4-31B-IT）。浏览器直连可能被 CORS 拦截；此时双击项目根目录「启动 AI 代理.cmd」，把 Base URL 改为 http://127.0.0.1:8787/v1，模型与 Key 不变。代理不启动不影响游戏，未配置 Key 时 AI 只提示未配置。
+          </div>}
           <label className={label}>API Key（仅存本机，不明文回显）<input className={input} type="password" autoComplete="off" value={draft.ai.apiKey} onChange={e => setAi({ apiKey: e.target.value })} /></label>
           <div className="flex items-center gap-2">
             <button onClick={runTest} disabled={testing} className="rounded-lg bg-sky text-ink px-3 py-1 font-mono text-xs disabled:opacity-50">{testing ? '测试中…' : '测试连接'}</button>
