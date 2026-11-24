@@ -10,6 +10,11 @@ export class AiError extends Error {
 }
 
 const TIMEOUT_MS = 20000;
+// Lightweight client-side guard: two user-triggered calls with the same
+// purpose within 1s are rejected locally, so a double click / StrictMode
+// double invoke never opens a second connection.
+const lastRequestAt = new Map<string, number>();
+const REQUEST_GAP_MS = 1000;
 const normalizeBase = (baseUrl: string): string => {
   const b = baseUrl.trim().replace(/\/+$/, '');
   if (!b) throw new AiError('unavailable', '未配置模型：请先在设置中填写接口地址（Base URL）');
@@ -27,8 +32,21 @@ export function assertConfigured(settings: Settings, requireEnabled = true): voi
 }
 
 // Single fetch call site. Caller must have checked configuration first.
-export async function callChat(settings: Settings, messages: ChatMessage[], externalSignal?: AbortSignal): Promise<string> {
+export async function callChat(
+  settings: Settings,
+  messages: ChatMessage[],
+  externalSignal?: AbortSignal,
+  options: { maxTokens?: number; throttleKey?: string } = {},
+): Promise<string> {
   assertConfigured(settings);
+  if (options.throttleKey) {
+    const now = Date.now();
+    const last = lastRequestAt.get(options.throttleKey);
+    if (last !== undefined && now - last < REQUEST_GAP_MS) {
+      throw new AiError('http', '请求过于频繁：已拦截一次重复点击，未产生额外连接，请稍后再试');
+    }
+    lastRequestAt.set(options.throttleKey, now);
+  }
   const url = normalizeBase(settings.ai.baseUrl);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -50,7 +68,7 @@ export async function callChat(settings: Settings, messages: ChatMessage[], exte
             'X-Title': 'Meadowmint Draw',
           } : {}),
         },
-        body: JSON.stringify({ model: settings.ai.model.trim(), messages, temperature: 0.4, max_tokens: 1200 }),
+        body: JSON.stringify({ model: settings.ai.model.trim(), messages, temperature: 0.4, max_tokens: options.maxTokens ?? 1200 }),
       });
     } catch (err) {
       if (controller.signal.aborted) throw new AiError('timeout', '请求超时或被取消，请重试');
@@ -59,7 +77,7 @@ export async function callChat(settings: Settings, messages: ChatMessage[], exte
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) throw new AiError('http', '认证失败：API Key 无效或无权访问该模型（' + response.status + '）；AMD 用户请确认 Key 与模型 ID 正确，直连失败可改用本地代理');
       if (response.status === 402) throw new AiError('http', '额度不足：账户余额或免费额度不足（402）');
-      if (response.status === 429) throw new AiError('http', '请求频繁、额度受限或模型繁忙（429），稍后重试或换一个模型');
+      if (response.status === 429) throw new AiError('http', '请求过于频繁（429）：已达到 AMD TokenLab 每分钟连接上限，请等待约 1 分钟后再点 AI 起稿，或换一个模型/接口');
       throw new AiError('http', '接口返回错误 ' + response.status + ' ' + response.statusText);
     }
     let data: { choices?: { message?: { content?: string } }[] };

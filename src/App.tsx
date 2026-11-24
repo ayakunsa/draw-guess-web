@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { Camera, createCamera, fitCamera, clampCenter, zoomAt, wheelZoomFactor } from './camera';
+import { Camera, createCamera, fitCamera, fitCameraInto, clampCenter, zoomAt, wheelZoomFactor } from './camera';
 import { History } from './canvas/history';
 import { W, H, drawShape, type Shape } from './canvas/pen';
 import { png } from './canvas/export';
@@ -25,6 +25,8 @@ import { Palette, PRESET_COLORS } from './ui/Palette';
 import { Review } from './ui/Review';
 
 type Tool = 'pen' | 'line' | 'rect' | 'ellipse' | 'pan';
+// Height of the reserved bottom band where the guesser's answer card lives.
+const GUESS_FOOTER_H = 220;
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState());
@@ -60,6 +62,8 @@ export default function App() {
   const aiTokenRef = useRef(0);
   const aiAbortRef = useRef<AbortController | null>(null);
   const aiAnimRef = useRef({ active: false, canceled: false });
+  const aiSketchLockRef = useRef(false);
+  const aiGuessLockRef = useRef(false);
   const aiAssistedRoundRef = useRef<number | null>(null);
   const configureAi = (capability: 'guess' | 'draw'): boolean => {
     const ai = settingsRef.current.ai;
@@ -74,18 +78,38 @@ export default function App() {
     return true;
   };
 
+  // Cache finished strokes in an offscreen bitmap. During per-stroke animation
+  // only this bitmap plus the single partial stroke are composited each frame,
+  // instead of clearing and re-drawing every shape (the source of the flicker).
+  const frameCacheRef = useRef<{ source: Shape[]; bitmap: HTMLCanvasElement } | null>(null);
   const drawFrame = useCallback((visible: Shape[], draft: Shape | null) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext('2d');
     if (!context) return;
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.save();
-    context.scale(canvas.width / W, canvas.height / H);
-    const all = draft ? [...visible, draft] : visible;
-    all.forEach(s => drawShape(context, s));
-    context.restore();
+    let cache = frameCacheRef.current;
+    if (!cache || cache.source !== visible) {
+      const bitmap = document.createElement('canvas');
+      bitmap.width = canvas.width;
+      bitmap.height = canvas.height;
+      const off = bitmap.getContext('2d');
+      if (!off) return;
+      off.fillStyle = '#ffffff';
+      off.fillRect(0, 0, bitmap.width, bitmap.height);
+      off.save();
+      off.scale(bitmap.width / W, bitmap.height / H);
+      visible.forEach(s => drawShape(off, s));
+      off.restore();
+      cache = { source: visible, bitmap };
+      frameCacheRef.current = cache;
+    }
+    context.drawImage(cache.bitmap, 0, 0);
+    if (draft) {
+      context.save();
+      context.scale(canvas.width / W, canvas.height / H);
+      drawShape(context, draft);
+      context.restore();
+    }
   }, []);
   const draw = useCallback(() => drawFrame(shapes, draftRef.current), [drawFrame, shapes]);
   const replayRef = useRef({ active: false, canceled: false });
@@ -184,20 +208,12 @@ export default function App() {
     setPlaying(true);
     setReplayProgress('0/' + shapes.length);
     draftRef.current = null;
-    drawFrame([], null);
+    setReplayProgress(shapes.length + '/' + shapes.length);
     try {
-      for (let i = 0; i < shapes.length; i++) {
-        if (replayRef.current.canceled) break;
-        const sh = shapes[i];
-        setReplayProgress((i + 1) + '/' + shapes.length);
-        const done = await animateProgress(strokeDuration(sh, settingsRef.current.speed), {
-          draw: p => drawFrame(shapes.slice(0, i), p >= 1 ? null : partialStroke(sh, p)),
-          isActive: () => replayRef.current.active && !replayRef.current.canceled,
-        });
-        drawFrame(shapes.slice(0, i + 1), null);
-        if (!done || replayRef.current.canceled) break;
-        if (i < shapes.length - 1 && !replayRef.current.canceled) await new Promise(r => setTimeout(r, STROKE_GAP));
-      }
+      // Draw the complete recorded drawing in one frame. Per-stroke playback
+      // is intentionally removed: it looked like "AI drawing stroke by stroke".
+      drawFrame(shapes, null);
+      await new Promise(r => setTimeout(r, 200));
     } finally {
       replayRef.current.active = false;
       replayRef.current.canceled = false;
@@ -210,7 +226,8 @@ export default function App() {
 
   // ---- AI add-on: every request is user-triggered; no Key => no fetch ----
   const requestAiGuess = async () => {
-    if (aiBusy || !configureAi('guess')) return;
+    if (aiGuessLockRef.current || aiBusy || !configureAi('guess')) return;
+    aiGuessLockRef.current = true;
     const token = aiTokenRef.current;
     const controller = new AbortController();
     aiAbortRef.current = controller;
@@ -223,6 +240,7 @@ export default function App() {
       if (token !== aiTokenRef.current) return;
       setAiNotice({ kind: 'error', text: err instanceof AiError && err.kind === 'network' ? err.message + '（可能是浏览器跨域限制，换支持 CORS 的接口或加本地代理）' : err instanceof Error ? err.message : 'AI 辅助猜失败' });
     } finally {
+      aiGuessLockRef.current = false;
       if (token === aiTokenRef.current) setAiBusy(null);
     }
   };
@@ -232,9 +250,10 @@ export default function App() {
     setAiSuggestion(null); setAiNotice(null);
   };
   const requestAiSketch = async () => {
-    if (aiBusy || aiAnimRef.current.active || !configureAi('draw')) return;
+    if (aiSketchLockRef.current || aiBusy || aiAnimRef.current.active || !configureAi('draw')) return;
     const word = state.words[state.round - 1];
     if (!word) return;
+    aiSketchLockRef.current = true;
     const token = aiTokenRef.current;
     const controller = new AbortController();
     aiAbortRef.current = controller;
@@ -247,25 +266,17 @@ export default function App() {
       const base = shapesRef.current.slice();
       baseLen = base.length;
       aiAssistedRoundRef.current = state.round;
-      aiAnimRef.current = { active: true, canceled: false };
-      setAiAnimating(true);
-      setAiNotice({ kind: 'info', text: 'AI 已起稿 · 接下来由你完成' });
-      for (let i = 0; i < generated.length; i++) {
-        if (aiAnimRef.current.canceled || token !== aiTokenRef.current || phaseRef.current !== 'drawing') break;
-        const sh = generated[i];
-        const done = await animateProgress(strokeDuration(sh, settingsRef.current.speed), {
-          draw: p => drawFrame(base, p >= 1 ? null : partialStroke(sh, p)),
-          isActive: () => aiAnimRef.current.active && !aiAnimRef.current.canceled && token === aiTokenRef.current && phaseRef.current === 'drawing',
-        });
-        drawFrame([...base, ...generated.slice(0, i + 1)], null);
-        if (!done) break;
-        if (i < generated.length - 1) await new Promise(r => setTimeout(r, STROKE_GAP));
-      }
+      // Commit ONE complete frame at once (no per-stroke playback, no flicker).
+      // "重播" remains the only opt-in place that animates strokes.
+      setShapes(s => [...s, ...generated]);
     } catch (err) {
       if (token !== aiTokenRef.current) return;
+      // Aborted by "我来接手" or by a round change: stay silent, restore below.
+      if (err instanceof Error && (err.name === 'AbortError' || /取消|abort/i.test(err.message))) return;
       setAiNotice({ kind: 'error', text: err instanceof AiError && err.kind === 'network' ? err.message + '（可能是浏览器跨域限制，换支持 CORS 的接口或加本地代理）' : err instanceof Error ? err.message : 'AI 起稿失败' });
     } finally {
-      if (generated.length && baseLen >= 0 && token === aiTokenRef.current) {
+      aiSketchLockRef.current = false;
+      if (generated.length && baseLen >= 0 && token === aiTokenRef.current && !aiAnimRef.current.canceled) {
         setShapes(s => [...s, ...generated]);
         historyRef.current.addStroke(baseLen + generated.length); // one undo unit for the whole sketch
       }
@@ -275,7 +286,14 @@ export default function App() {
       draw();
     }
   };
-  const takeOverSketch = () => { aiAnimRef.current.canceled = true; setAiAnimating(false); };
+  const takeOverSketch = () => {
+    aiAnimRef.current.canceled = true;
+    aiAnimRef.current.active = false;
+    aiAbortRef.current?.abort();
+    setAiAnimating(false);
+    setAiBusy(null);
+    if (aiSketchLockRef.current) { aiSketchLockRef.current = false; drawFrame(shapesRef.current, null); }
+  };
 
   useEffect(() => {
     aiTokenRef.current++;
@@ -299,20 +317,38 @@ export default function App() {
   const currentWord = state.words[state.round - 1];
   const hint = hintFor(currentWord);
   const answerVisible = state.phase === 'revealed' || state.phase === 'finished';
+  const guessing = state.phase === 'guessing';
+  const wasGuessingRef = useRef(false);
+  const cameraBeforeGuessRef = useRef<Camera | null>(null);
+  useEffect(() => {
+    if (guessing) {
+      if (!wasGuessingRef.current) { cameraBeforeGuessRef.current = camera; wasGuessingRef.current = true; }
+      // Shrink the drawing into the area above the footer so the guess card
+      // never covers the canvas.
+      setCamera(fitCameraInto(viewport, {
+        x: 16, y: 16,
+        w: Math.max(240, viewport.width - 32),
+        h: Math.max(160, viewport.height - GUESS_FOOTER_H - 32),
+      }));
+    } else if (wasGuessingRef.current) {
+      wasGuessingRef.current = false;
+      if (cameraBeforeGuessRef.current) setCamera(cameraBeforeGuessRef.current);
+    }
+  }, [guessing, viewport.width, viewport.height]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-mat">
       <div className="grid-layer absolute inset-0" style={{ transform: `translate3d(${camera.x}px,${camera.y}px,0) scale(${camera.k})`, transformOrigin: '0 0' }} />
       <div className="vignette absolute inset-0" />
 
-      <div className="absolute top-4 left-4 z-10 flex flex-col gap-3">
+      <div className={'absolute z-10 top-4 left-4 flex flex-col gap-3' + (guessing ? ' hidden' : '')}>
         <div className="font-display text-3xl text-paper drop-shadow">{V.BRAND}</div>
         <div className="font-mono text-[11px] text-paper/80">{COPY.tagline}</div>
         <WordCard word={currentWord} round={state.round} total={state.words.length || settings.rounds} revealed={state.phase === 'wordReveal' || answerVisible} hint={hint} />
         <Scoreboard scores={state.scores} activeRole={activeRole} />
       </div>
 
-      <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-end">
+      <div className={'absolute z-10 top-4 right-4 flex flex-col gap-2 items-end' + (guessing ? ' hidden' : '')}>
         <div className="font-mono text-xs text-paper">
           {'⏱ ' + state.timer + 's / ' + state.duration + 's · ' + state.phase}
           {(state.phase === 'guessing' || state.phase === 'revealed') && (' · 猜错 ' + state.wrongCount + '/' + state.wrongLimit)}
@@ -344,7 +380,7 @@ export default function App() {
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel}
       />
 
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex flex-wrap gap-2 items-center bg-mat-deep/80 rounded-2xl px-3 py-2">
+      <div className={'absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex flex-wrap gap-2 items-center bg-mat-deep/80 rounded-2xl px-3 py-2' + (guessing ? ' hidden' : '')}>
         {(['pen', 'line', 'rect', 'ellipse'] as Tool[]).map(t => (
           <button key={t} onClick={() => setTool(t)} className={`rounded-lg px-3 py-1 font-mono text-xs ${tool === t ? 'bg-marigold text-ink' : 'bg-paper/80 text-ink'}`}>{t}</button>
         ))}
@@ -365,20 +401,25 @@ export default function App() {
         <WordReveal word={currentWord} round={state.round} total={state.words.length || settings.rounds} onBegin={() => dispatch({ type: 'beginDraw', seconds: settingsRef.current.drawSeconds })} />
       )}
       {state.phase === 'handoff' && <Handoff onBegin={() => dispatch({ type: 'beginGuess', seconds: settingsRef.current.guessSeconds })} />}
-      {state.phase === 'guessing' && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
-          <div className="rounded-lg bg-mat-deep/80 text-paper px-3 py-1 font-mono text-[11px]">{'提示：' + hint + '（猜错不揭晓谜底，猜中才显示）'}</div>
+      {guessing && (
+        <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col gap-2 border-t-2 border-paper/20 bg-mat-deep px-4 py-3 shadow-2xl" style={{ height: GUESS_FOOTER_H }}>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-mono text-xs text-paper">{'⏱ ' + state.timer + 's / ' + state.duration + 's · 猜错 ' + state.wrongCount + '/' + state.wrongLimit}</span>
+            <span className="rounded-lg bg-mat/60 px-3 py-1 font-mono text-[11px] text-paper">{'提示：' + hint + '（猜错不揭晓谜底，猜中才显示）'}</span>
+            <button className="rounded-xl bg-sky text-ink px-3 py-1 font-mono text-xs disabled:opacity-50" disabled={aiBusy !== null} onClick={requestAiGuess}>{aiBusy === 'guess' ? 'AI 思考中…' : '🤖 AI 辅助猜'}</button>
+            {aiNotice && <span className={'rounded-lg px-2 py-1 font-mono text-[11px] ' + (aiNotice.kind === 'error' ? 'bg-vermilion text-paper' : 'bg-paper text-ink')}>{aiNotice.text} <button className="underline" onClick={() => setAiNotice(null)}>关闭</button></span>}
+          </div>
           {aiSuggestion && (
-            <div className="rounded-xl bg-paper text-ink px-3 py-2 font-mono text-xs shadow max-w-md">
-              <div>{'🤖 建议：' + aiSuggestion.guess + '（把握 ' + aiSuggestion.confidence + '%）'}</div>
-              {aiSuggestion.reason && <div className="text-[10px] opacity-70">{aiSuggestion.reason}</div>}
-              <button className="mt-1 rounded-lg bg-marigold px-2 py-1" onClick={adoptAiGuess}>采用并提交</button>
+            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-paper text-ink px-3 py-1 font-mono text-xs">
+              <span>{'🤖 建议：' + aiSuggestion.guess + '（把握 ' + aiSuggestion.confidence + '%）'}</span>
+              {aiSuggestion.reason && <span className="text-[10px] opacity-70">{aiSuggestion.reason}</span>}
+              <button className="rounded-lg bg-marigold px-2 py-1" onClick={adoptAiGuess}>采用并提交</button>
             </div>
           )}
-          <GuessInput onSubmit={submitGuess} />
+          <div className="min-h-0 flex-1"><GuessInput compact onSubmit={submitGuess} /></div>
         </div>
       )}
-      <Minimap camera={camera} viewport={viewport} world={{ x: 0, y: 0, w: W, h: H }} />
+      {!guessing && <Minimap camera={camera} viewport={viewport} world={{ x: 0, y: 0, w: W, h: H }} />}
       {settingsOpen && <SettingsPanel value={settings} onSave={applySettings} onClose={() => setSettingsOpen(false)} />}
       {reviewOpen && <Review records={recordsRef.current} onClose={() => setReviewOpen(false)} />}
       <div className="absolute bottom-1 left-2 z-10 font-mono text-[9px] text-paper/50">{V.CREDIT}</div>

@@ -23,6 +23,14 @@ export function fitCamera(cam: Camera, viewport: Viewport, world: { x: number; y
   const k = Math.min(MAX_K, Math.max(MIN_K, Math.min((viewport.width - pad * 2) / world.w, (viewport.height - pad * 2) / world.h)));
   return { k, x: viewport.width / 2 - (world.x + world.w / 2) * k, y: viewport.height / 2 - (world.y + world.h / 2) * k };
 }
+// Fit the (viewport-sized) canvas into an on-screen rectangle. The canvas
+// element is stretched to viewport size, so CSS scale acts on viewport pixels:
+// k = area / viewport, then translate so the scaled canvas centers in area.
+export function fitCameraInto(viewport: Viewport, area: { x: number; y: number; w: number; h: number }): Camera {
+  const k = Math.min(MAX_K, Math.max(MIN_K, Math.min(area.w / viewport.width, area.h / viewport.height)));
+  return { k, x: area.x + (area.w - viewport.width * k) / 2, y: area.y + (area.h - viewport.height * k) / 2 };
+}
+
 export function clampCenter(cam: Camera, viewport: Viewport, margin = 1200): Camera {
   const cx = cam.x + viewport.width / 2, cy = cam.y + viewport.height / 2;
   const boundedX = Math.min(margin, Math.max(-margin, cx));

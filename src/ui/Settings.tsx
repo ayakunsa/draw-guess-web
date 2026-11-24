@@ -64,6 +64,7 @@ export const SettingsPanel: React.FC<{ value: Settings; onSave: (value: Settings
           <label className={label + ' flex items-center gap-2'}><input type="checkbox" checked={draft.ai.enabled} onChange={e => setAi({ enabled: e.target.checked })} /> 启用 AI 辅助（关闭时 AI 功能只提示未配置，不联网）</label>
           <label className={label + ' flex items-center gap-2'}><input type="checkbox" checked={draft.ai.assistGuess} onChange={e => setAi({ assistGuess: e.target.checked })} /> 猜题时允许 AI 辅助猜</label>
           <label className={label + ' flex items-center gap-2'}><input type="checkbox" checked={draft.ai.assistDraw} onChange={e => setAi({ assistDraw: e.target.checked })} /> 画画时允许 AI 起稿</label>
+          {draft.ai.assistGuess && draft.ai.assistDraw && <div className="rounded-lg bg-marigold/10 border border-marigold/30 px-2 py-1 font-mono text-[10px] text-paper/80 leading-relaxed">提示：同时开启「辅助猜」和「AI 起稿」会叠加 API 请求；AMD TokenLab 限制每分钟 20 次连接，建议一次只使用一项。</div>}
           <div className="grid grid-cols-2 gap-3">
             <label className={label}>服务商
               <select className={input} value={draft.ai.provider} onChange={e => {

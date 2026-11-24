@@ -45,17 +45,36 @@ export function buildSketchPrompt(word: Word): string {
   return [
     '你要为“你画我猜”游戏起稿。题目：' + word.answer + '（' + word.category + '）。用简笔画表现它，让人能猜出这个词。',
     '画布尺寸 ' + W + '×' + H + '，坐标原点在左上角。只输出 JSON 数组，每个元素是一笔 Shape：' + schema,
-    '规则：最多 20 笔；points 每个是 [x,y] 数字对；颜色用 #RRGGBB；fill 用 "none"；width 1-20。',
+    '规则：建议 12-20 笔，最多 20 笔；坐标 x 在 0-' + W + '、y 在 0-' + H + '；points 每个是 [x,y] 数字对；颜色用 #RRGGBB；fill 用 "none"；width 1-20。',
+    '重要：只输出一个完整 JSON 数组，模型必须一次性返回整幅画的所有笔画；不要分批、不要逐笔、不要多次输出（客户端不会追加后续批次）。',
     '不要写题目文字、不要输出解释、不要 Markdown 围栏。只输出笔迹数组，例如：[{"type":"ellipse","x":500,"y":300,"rx":80,"ry":60,"color":"#202633","fill":"none","width":5}]',
   ].join('\n');
 }
 
+// Mirrors ai-draw-guess/lib/drawing-response.mjs: at most ONE format-repair
+// request. Network/auth/timeout errors are never retried.
+function buildSketchRepairPrompt(word: Word): string {
+  return [
+    '你要为“你画我猜”游戏起稿。题目：' + word.answer + '（' + word.category + '）。',
+    '上次回复没有通过笔迹格式检查，没有应用到画布。这次只修正输出格式：重新提交一个完整 JSON 数组，不要解释、不要道歉、不要 Markdown 围栏。',
+    buildSketchPrompt(word),
+  ].join('\n');
+}
+
 export async function aiSketch(settings: Settings, word: Word, signal?: AbortSignal): Promise<Shape[]> {
-  const text = await callChat(settings, [
+  // Throttle only the user-triggered first call. The bounded repair call below
+  // is deliberate and must not be swallowed by the 1s guard.
+  const throttleKey = 'sketch:' + settings.ai.baseUrl + ':' + word.answer;
+  const send = (prompt: string, throttled: boolean) => callChat(settings, [
     { role: 'system', content: system },
-    { role: 'user', content: buildSketchPrompt(word) },
-  ], signal);
-  const shapes = parseShapes(text);
-  if (!shapes) throw new Error('模型未给出有效笔迹，请重试或换一个模型');
+    { role: 'user', content: prompt },
+  ], signal, { maxTokens: 4096, ...(throttled ? { throttleKey } : {}) });
+  let text = await send(buildSketchPrompt(word), true);
+  let shapes = parseShapes(text);
+  if (!shapes) {
+    text = await send(buildSketchRepairPrompt(word), false);
+    shapes = parseShapes(text);
+  }
+  if (!shapes) throw new Error('模型未给出有效笔迹（已自动修正一次仍未通过），请重试或换一个模型');
   return shapes;
 }
