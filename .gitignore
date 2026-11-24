@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Local config / secrets (defensive: this app stores settings in browser localStorage)
+.env
+.env.*
+!.env.example
+config.local.*
+settings.local.*
+
+# Local caches / generated build artifacts
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.vite/
+.cache/
+*.log
+tmp/

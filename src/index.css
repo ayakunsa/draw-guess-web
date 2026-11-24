@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100dvh; margin: 0; overflow: hidden; overscroll-behavior: none; }
+body { font-family: 'Instrument Sans Variable', system-ui, sans-serif; color: #10231E; background: #0A5C4B; -webkit-tap-highlight-color: transparent; }
+* { box-sizing: border-box; }
+button, input { font: inherit; }
+.canvas-surface { touch-action: none; user-select: none; -webkit-user-select: none; }
+.grid-layer {
+  background-image: radial-gradient(circle, #2F8B75 1.2px, transparent 1.2px), radial-gradient(circle, #7CCDB5 2px, transparent 2px);
+  background-size: 32px 32px, 256px 256px;
+}
+.vignette { background: radial-gradient(ellipse at center, transparent 55%, #074537 100%); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
