@@ -63,7 +63,7 @@ export const Review: React.FC<Props> = ({ records, onClose }) => {
                 className={'w-full text-left rounded-lg px-2 py-2 font-mono text-xs ' + (i === selected ? 'bg-marigold/30 ring-1 ring-marigold' : 'hover:bg-ink/5')}>
                 <div className="text-ink font-bold">第 {r.round} 回合</div>
                 <div className="text-ink/60 truncate">{r.word.answer}</div>
-                <div className="text-[10px] text-ink/50">{RESULT[r.result] || r.result}</div>
+                <div className="text-[10px] text-ink/50">{RESULT[r.result] || r.result}{r.aiAssisted ? ' · 🤖 AI 起稿' : ''}</div>
               </button>
             ))}
           </div>
@@ -71,7 +71,7 @@ export const Review: React.FC<Props> = ({ records, onClose }) => {
             {rec ? (
               <>
                 <div className="flex items-center justify-between">
-                  <div className="font-mono text-sm text-ink">题目：<b>{rec.word.answer}</b> · {rec.word.category} · {RESULT[rec.result] || rec.result} · 猜错 {rec.wrongCount}/{rec.wrongLimit}</div>
+                  <div className="font-mono text-sm text-ink">题目：<b>{rec.word.answer}</b> · {rec.word.category} · {RESULT[rec.result] || rec.result} · 猜错 {rec.wrongCount}/{rec.wrongLimit}{rec.aiAssisted ? ' · 🤖 AI 起稿' : ''}</div>
                   <div className="flex gap-2">
                     <button onClick={playing ? stop : replay} className="rounded-lg bg-ink text-paper px-3 py-1 font-mono text-xs">{playing ? '⏹ 停止' : '▶ 重播绘制'}</button>
                   </div>
@@ -84,7 +84,7 @@ export const Review: React.FC<Props> = ({ records, onClose }) => {
                     <tbody>
                       {rec.guesses.map((g, i) => (
                         <tr key={i} className="border-t border-ink/10">
-                          <td className="p-1.5">{i + 1}</td><td className="p-1.5">{g.value}</td>
+                          <td className="p-1.5">{i + 1}</td><td className="p-1.5">{g.value}{g.source === 'ai' ? ' <span className="text-[#2A6FB0]">🤖AI</span>' : ''}</td>
                           <td className={'p-1.5 ' + (g.judgement.correct ? 'text-[#0A5C4B]' : 'text-vermilion')}>{g.judgement.correct ? '✅ 猜中' : '❌ 未中'}</td>
                           <td className="p-1.5">{g.confidence == null ? '—' : submittedLabel(g.confidence)}</td>
                         </tr>

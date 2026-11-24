@@ -1,15 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import { CATEGORIES, CATEGORY_LEVELS, type Category, type Level } from '../game/words';
-import { DEFAULT_SETTINGS, MODEL_PRESETS, type Settings } from '../game/settings';
+import { AI_PROVIDERS, DEFAULT_SETTINGS, MODEL_PRESETS, type Settings } from '../game/settings';
+import { testConnection } from '../ai/client';
 
 // Modal z-30: below wordReveal/handoff (z-40), above the toolbar.
 export const SettingsPanel: React.FC<{ value: Settings; onSave: (value: Settings) => void; onClose: () => void }> = ({ value, onSave, onClose }) => {
   const [draft, setDraft] = useState<Settings>(value);
   useEffect(() => setDraft(value), [value]);
   const set = <K extends keyof Settings>(key: K, val: Settings[K]) => setDraft(d => ({ ...d, [key]: val }));
+  const setAi = (patch: Partial<Settings['ai']>) => setDraft(d => ({ ...d, ai: { ...d.ai, ...patch } }));
   const category = CATEGORIES.includes(draft.category as Category) ? draft.category as Category : '成语';
   const levels = CATEGORY_LEVELS[category];
   const level = levels.some(l => l.id === draft.level) ? draft.level as Level : levels[0].id;
+
+  const [customModel, setCustomModel] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const modelIsPreset = MODEL_PRESETS.includes(draft.ai.model);
+  const modelChoice = modelIsPreset ? draft.ai.model : '__custom__';
+  useEffect(() => { if (!MODEL_PRESETS.includes(draft.ai.model)) setCustomModel(draft.ai.model); }, [draft.ai.model]);
+
+  const runTest = async () => {
+    setTesting(true); setTestResult(null);
+    const result = await testConnection(draft);
+    setTestResult(result); setTesting(false);
+  };
 
   const label = 'block font-mono text-[11px] text-paper/80 mb-1';
   const input = 'w-full rounded-lg bg-paper text-ink px-2 py-1 font-mono text-sm';
@@ -41,30 +56,51 @@ export const SettingsPanel: React.FC<{ value: Settings; onSave: (value: Settings
           </label>
         </div>
 
-        <div className="border-t border-paper/20 pt-3">
-          <div className="font-mono text-[11px] text-paper/60 mb-2">AI 出题人预留位（未启用 · 不会发起任何网络请求）</div>
-          <label className={label + ' flex items-center gap-2'}>
-            <input type="checkbox" checked={draft.ai.enabled} onChange={e => setDraft(d => ({ ...d, ai: { ...d.ai, enabled: e.target.checked } }))} /> 启用（仅供配置，暂不生效）
-          </label>
+        <div className="border-t border-paper/20 pt-3 flex flex-col gap-2">
+          <div className="font-display text-lg text-paper">AI 辅助（添头 · 可选）</div>
+          <label className={label + ' flex items-center gap-2'}><input type="checkbox" checked={draft.ai.enabled} onChange={e => setAi({ enabled: e.target.checked })} /> 启用 AI 辅助（关闭时 AI 功能只提示未配置，不联网）</label>
+          <label className={label + ' flex items-center gap-2'}><input type="checkbox" checked={draft.ai.assistGuess} onChange={e => setAi({ assistGuess: e.target.checked })} /> 猜题时允许 AI 辅助猜</label>
+          <label className={label + ' flex items-center gap-2'}><input type="checkbox" checked={draft.ai.assistDraw} onChange={e => setAi({ assistDraw: e.target.checked })} /> 画画时允许 AI 起稿</label>
           <div className="grid grid-cols-2 gap-3">
-            <label className={label}>显示名<input className={input} value={draft.ai.name} onChange={e => setDraft(d => ({ ...d, ai: { ...d.ai, name: e.target.value } }))} /></label>
-            <label className={label}>模型
-              <select className={input} value={draft.ai.model} onChange={e => setDraft(d => ({ ...d, ai: { ...d.ai, model: e.target.value } }))}>
-                <option value="">（未选择）</option>{MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
+            <label className={label}>服务商
+              <select className={input} value={draft.ai.provider} onChange={e => {
+                const p = AI_PROVIDERS.find(x => x.id === e.target.value);
+                if (p) setAi({ provider: p.id, name: p.name, baseUrl: p.baseUrl || draft.ai.baseUrl });
+              }}>
+                {AI_PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </label>
-            <label className={label}>Provider<input className={input} value={draft.ai.provider} onChange={e => setDraft(d => ({ ...d, ai: { ...d.ai, provider: e.target.value } }))} /></label>
-            <label className={label}>Base URL<input className={input} value={draft.ai.baseUrl} onChange={e => setDraft(d => ({ ...d, ai: { ...d.ai, baseUrl: e.target.value } }))} /></label>
+            <label className={label}>显示名<input className={input} value={draft.ai.name} onChange={e => setAi({ name: e.target.value })} /></label>
+            <label className={label}>模型
+              <select className={input} value={modelChoice} onChange={e => {
+                if (e.target.value === '__custom__') setAi({ model: '' });
+                else setAi({ model: e.target.value });
+              }}>
+                <option value="">（未选择）</option>
+                {MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
+                <option value="__custom__">自定义（下方输入模型 ID）</option>
+              </select>
+            </label>
+            <label className={label}>自定义模型 ID
+              <input className={input} value={customModel} placeholder="例如 provider/model-name"
+                onChange={e => { setCustomModel(e.target.value); setAi({ model: e.target.value }); }}
+                disabled={modelIsPreset && !!draft.ai.model} />
+            </label>
+            <label className={label + ' col-span-2'}>Base URL<input className={input} value={draft.ai.baseUrl} onChange={e => setAi({ baseUrl: e.target.value })} /></label>
           </div>
-          <label className={label}>API Key（仅存本机，不明文回显）<input className={input} type="password" autoComplete="off" value={draft.ai.apiKey} onChange={e => setDraft(d => ({ ...d, ai: { ...d.ai, apiKey: e.target.value } }))} /></label>
+          <label className={label}>API Key（仅存本机，不明文回显）<input className={input} type="password" autoComplete="off" value={draft.ai.apiKey} onChange={e => setAi({ apiKey: e.target.value })} /></label>
+          <div className="flex items-center gap-2">
+            <button onClick={runTest} disabled={testing} className="rounded-lg bg-sky text-ink px-3 py-1 font-mono text-xs disabled:opacity-50">{testing ? '测试中…' : '测试连接'}</button>
+            {testResult && <span className={'font-mono text-[11px] ' + (testResult.ok ? 'text-[#0A5C4B]' : 'text-vermilion')}>{testResult.message}</span>}
+          </div>
         </div>
 
         <div className="flex gap-2 justify-end">
-          <button onClick={() => setDraft({ ...DEFAULT_SETTINGS, ai: { ...DEFAULT_SETTINGS.ai } })} className="rounded-lg bg-paper/40 text-paper px-3 py-2 font-mono text-xs">恢复默认</button>
+          <button onClick={() => { setDraft({ ...DEFAULT_SETTINGS, ai: { ...DEFAULT_SETTINGS.ai } }); setCustomModel(''); setTestResult(null); }} className="rounded-lg bg-paper/40 text-paper px-3 py-2 font-mono text-xs">恢复默认</button>
           <button onClick={onClose} className="rounded-lg bg-paper/80 text-ink px-3 py-2 font-mono text-xs">取消</button>
           <button onClick={() => onSave(draft)} className="rounded-lg bg-marigold text-ink px-4 py-2 font-display">保存</button>
         </div>
-        <div className="font-mono text-[9px] text-paper/40">设置保存在本机浏览器 localStorage；AI 字段仅为未来方案占位，本版本不调用任何接口。</div>
+        <div className="font-mono text-[9px] text-paper/40">设置保存在本机浏览器 localStorage。未填 Key 或未启用时 AI 功能只给出「未配置模型」提示，不发起任何网络请求；Key 明文保存在本机浏览器，请勿在公用设备使用。</div>
       </div>
     </div>
   );
