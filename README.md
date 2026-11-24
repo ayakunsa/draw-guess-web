@@ -1,10 +1,10 @@
 # Meadowmint Draw（draw-guess-web）
 
-一个纯前端的「你画我猜」小游戏：VibeFather 模板做壳，ai-draw-guess 的框架无关内核做玩法。
+一个纯前端的「你画我猜」小游戏
 
 ## 定位
 
-- **新建独立项目**，不合并进 `D:\04-dsh\ai-draw-guess`。后者原样保留，作为上游参考实现。
+- **新建独立项目**
 - 复用方式：从 ai-draw-guess **复制纯函数模块并改写为 TypeScript**，移植文件头注释标明来源路径，便于上游升级时手动同步。
 - 已按用户决策**去掉 Live2D 21 套角色（约 511MB + 专有 Cubism Core）**：无 `avatar-renderer`、无专有运行时、无服务端、无多模型 Key。
 - 技术栈：Vite 5 + React 18 + TypeScript + Tailwind 3.4 + GSAP + lucide-react；`npm run build` 输出静态文件到 `dist/`。零后端、零外部 API。
@@ -76,6 +76,8 @@ npm run build
 
 ## 来源与许可
 
-- 模板：VibeFather `infinite-canvas-moodboard`（free，CC BY-NC 4.0；商用需 Pro，请保留署名）。配方位于 `D:\04-dsh\awesome-vibe-coding-websites\templates\infinite-canvas-moodboard`。
-- 复用模块：`D:\04-dsh\ai-draw-guess` 的 `public/drawing.mjs`、`public/drawing-playback.mjs`、`public/guess-confidence.mjs`、`lib/game.mjs`、`lib/words.mjs`、`data/idioms.json`、`data/category-words.json`（原创代码 MIT；词库等数据各有条款，见 `src/data/SOURCES.md`，商用前请逐项核对）。
-- 本仓库仅为工程骨架，不复制任何 Live2D 角色资源。
+- 项目代码：MIT（测试用途，欢迎反馈）。
+- 模板视觉：VibeFather `infinite-canvas-moodboard`，CC BY-NC 4.0，保留署名。
+- 词库数据：各源自有条款（详见 `src/data/SOURCES.md`，不统称 MIT）。
+- 字体 OFL-1.1、图标 lucide-react ISC（见 `ASSETS.md`）。
+- 本仓库不复制任何 Live2D 角色资源。
